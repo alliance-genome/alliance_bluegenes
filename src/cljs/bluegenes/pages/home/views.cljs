@@ -298,8 +298,9 @@
   [:div.container.home
    [mine-intro]
    [template-queries]
-   [call-to-action]
+;   [call-to-action]
    [mine-selector]
-   [external-tools]
-   [feedback]
-   [credits]])
+;   [external-tools]
+;   [feedback]
+;   [credits]
+])
