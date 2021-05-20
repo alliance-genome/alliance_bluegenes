@@ -302,4 +302,5 @@
    [mine-selector]
 ;;   [external-tools]
 ;;   [feedback]
-   [credits]])
+;;   [credits]
+])
