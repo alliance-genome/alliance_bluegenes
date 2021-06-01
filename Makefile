@@ -11,3 +11,6 @@ less-prod: node_modules/.bin/lessc
 	npx lessc -x less/site.less resources/public/css/site.css
 
 .PHONY: less less-prod
+
+docker:
+	docker build -t image .
