@@ -94,8 +94,13 @@
 
     .mine-intro {
         .mine-name {
-            margin-bottom: @spacer;
             letter-spacing: @wide-letter-spacing;
+        }
+
+        .mine-release {
+            text-align: center;
+            font-size: 0.8em;
+            margin-bottom: @spacer*2;
         }
 
         .mine-description {
@@ -304,6 +309,14 @@
                     font-size: 1.1em;
                     text-transform: uppercase;
                     letter-spacing: @wider-letter-spacing;
+
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .icon {
+                    flex-shrink: 0;
                 }
             }
 
@@ -345,7 +358,7 @@
                     }
                 }
 
-                button {
+                a, button {
                     height: @mine-entry-height;
                     font-size: 1.1em;
                     font-weight: bold;

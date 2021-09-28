@@ -12,6 +12,8 @@
             [bluegenes.pages.lists.subs]
             [bluegenes.pages.tools.subs]
             [bluegenes.pages.developer.subs]
+            [bluegenes.pages.results.widgets.subs]
+            [bluegenes.pages.regions.subs]
             [bluegenes.version :as version]
             [bluegenes.utils :as utils]
             [lambdaisland.uri :refer [uri]]
@@ -27,14 +29,21 @@
  (fn [db]
    (:registry db)))
 
+(reg-sub
+ :registry-external
+ (fn [db]
+   (:registry-external db)))
+
 ;; Combines registry and configured mines, merging mines with the same namespace.
 ;; For when we want to display them all together!
 (reg-sub
  :registry+configured-mines
  :<- [:registry]
+ :<- [:registry-external]
  :<- [:env/mines]
- (fn [[registry configured]]
-   (merge configured registry)))
+ (fn [[registry registry-external configured]]
+   ;; Merge to a depth of 1, causing differing keys within the mine map to be kept.
+   (merge-with merge registry registry-external configured)))
 
 ;; Removes configured mines from registry.
 ;; For when we want to display them separate!
@@ -187,6 +196,12 @@
    (:description current-mine)))
 
 (reg-sub
+ :current-mine/release
+ :<- [:current-mine]
+ (fn [current-mine]
+   (:release current-mine)))
+
+(reg-sub
  :current-mine/oauth2-providers
  :<- [:current-mine]
  (fn [current-mine]
@@ -218,6 +233,12 @@
  :<- [:current-mine]
  (fn [current-mine]
    (get-in current-mine [:service :token])))
+
+(reg-sub
+ :active-service
+ :<- [:current-mine]
+ (fn [current-mine]
+   (get-in current-mine [:service])))
 
 (reg-sub
  :version
@@ -290,6 +311,18 @@
  :<- [:current-intermine-version]
  (fn [current-version]
    (utils/compatible-version? version/bg-properties-support current-version)))
+
+(reg-sub
+ :widget-support?
+ :<- [:current-intermine-version]
+ (fn [current-version]
+   (utils/compatible-version? version/widget-support current-version)))
+
+(reg-sub
+ :rdf-support?
+ :<- [:current-intermine-version]
+ (fn [current-version]
+   (utils/compatible-version? version/rdf-support current-version)))
 
 (reg-sub
  :show-mine-loader?

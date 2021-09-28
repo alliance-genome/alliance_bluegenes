@@ -13,7 +13,9 @@
             [cljs-time.coerce :as time-coerce]
             [bluegenes.route :as route]
             [bluegenes.components.tools.events :as tools]
-            [bluegenes.effects :refer [document-title]]))
+            [bluegenes.effects :refer [document-title]]
+            [bluegenes.utils :as utils]
+            [bluegenes.version :as version]))
 
 (comment
   "To automatically display some results in this section (the Results / List Analysis page),
@@ -142,13 +144,11 @@
                         :query-parts (clean-query-parts (q/group-views-by-class model value))
                         ; Clear the enrichment results before loading any new ones
                         :enrichment-results nil))
-        :dispatch-n [; Fire the enrichment event (see the TODO above)
-                     [:enrichment/enrich]
-                     [:im-tables/load
+        :dispatch-n [[:im-tables/load
                       im-table-location
                       {:service (merge service {:summary-fields summary-fields})
                        :query value
-                       :settings {:pagination {:limit 25}
+                       :settings {:pagination {:limit 10}
                                   :links {:vocab {:mine (name source)}
                                           :url (fn [{:keys [mine class objectId] :as vocab}]
                                                  (route/href ::route/report
@@ -193,8 +193,7 @@
    {:forward-events {:register :results-page-im-table-listener
                      ;; These fire whenever the query in im-tables is changed,
                      ;; and runs successfully.
-                     :events #{:main/replace-query-response
-                               :main/merge-query-response}
+                     :events #{:main/replace-query-response}
                      :dispatch-to [:results/update-tool-entities]}}))
 
 (reg-event-fx
@@ -215,8 +214,7 @@
      ;; two events dispatched below (see TODO above).
      {:db (update db :results assoc
                   :query-parts (clean-query-parts (q/group-views-by-class model query)))
-      :dispatch-n [(when (contains? (get-in db [:env :mines]) (:current-mine db))
-                     [:fetch-ids-tool-entities])
+      :dispatch-n [[:fetch-ids-tool-entities]
                    [:enrichment/enrich]]})))
 
 (reg-event-fx
@@ -250,15 +248,23 @@
    (let [entity {:class (name class)
                  :format "ids"
                  :value (reduce into results)}
-         entities (assoc (get-in db [:tools :entities])
-                         class entity)]
-     (cond-> {:db (assoc-in db [:tools :entities] entities)}
+         entities (assoc (get-in db [:tools :entities]) class entity)
+         current-version (get-in db [:assets :intermine-version (:current-mine db)])]
+     (cond-> {:db (assoc-in db [:tools :entities] entities)
+              :dispatch-n []}
        ;; If there are no nil values, we know all entities are done fetching
-       ;; and can load the viz/tools. (Tools are loaded through their
+       ;; and can load the viz/tools/widgets. (Tools are loaded through their
        ;; subscription updating when entities-ready? is set.)
        (every? some? (vals entities))
-       (-> (assoc :dispatch [:viz/run-queries])
-           (assoc-in [:db :results :entities-ready?] true))))))
+       (cond->
+         ;; Widgets use the same IDs computed for tools so we don't need to do
+         ;; the operation twice.
+         (utils/compatible-version? version/widget-support current-version)
+         (update :dispatch-n conj [:widgets/load])
+         ;; Only load viz and tools if on configured mine.
+         (contains? (get-in db [:env :mines]) (:current-mine db))
+         (-> (update :dispatch-n conj [:viz/run-queries])
+             (assoc-in [:db :results :entities-ready?] true)))))))
 
 (reg-event-db
  :clear-ids-tool-entity
@@ -291,10 +297,18 @@
                         (keyword (:widget params))] nil)
       :enrichment/get-enrichment [(:widget params) enrichment-chan]})))
 
+(defn clear-widget-options [db]
+  (-> db
+      (update-in [:results :text-filter] empty)
+      (update-in [:results :enrichment-settings] dissoc :population)
+      (update-in [:results :widget-filters] empty)))
+
 (reg-event-db
  :results/clear
  (fn [db]
-   (assoc-in db [:results :query] nil)))
+   (-> db
+       (assoc-in [:results :query] nil)
+       (clear-widget-options))))
 
 (reg-event-db
  :list-description/edit
