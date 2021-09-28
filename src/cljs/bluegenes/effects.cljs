@@ -5,7 +5,8 @@
             [cljs-http.client :as http]
             [cognitect.transit :as t]
             [bluegenes.titles :refer [db->title]]
-            [oops.core :refer [ocall oget]]
+            [bluegenes.utils :refer [encode-file]]
+            [oops.core :refer [ocall oget oset!]]
             [goog.dom :as gdom]
             [goog.style :as gstyle]
             [goog.fx.dom :as gfx]))
@@ -171,7 +172,7 @@
            multipart-params
            response-format
            on-success
-           on-error
+           on-failure
            on-unauthorised
            on-progress-upload
            progress]}]
@@ -195,7 +196,7 @@
             (cond
               (<= 200 status 399) (when on-success (dispatch (conj on-success body)))
               (<= 400 status 499) (when on-unauthorised (dispatch (conj on-unauthorised response)))
-              (<= 500 status 599) (when on-error (dispatch (conj on-error response)))
+              (<= 500 status 599) (when on-failure (dispatch (conj on-failure response)))
               :else nil)))
       (when on-progress-upload
         (go-loop []
@@ -217,7 +218,7 @@
                     :uri "/api"
                     :json-params {:value 1 :another 2}
                     :on-success [:some-success-event]
-                    :on-error [:some-failure-event]}})))
+                    :on-failure [:some-failure-event]}})))
 
 (comment
   (reg-event-fx :do-a/query
@@ -226,7 +227,7 @@
                    ; or... ::fx/im-chan if the namespace is referred
                    {:chan (imcljs.fetch/rows service query options)
                     :on-success [:save-query-results-event]
-                    :on-error [:warn-user-about-error-event]}})))
+                    :on-failure [:warn-user-about-error-event]}})))
 
 ;; Switching mines is usually so quick that we don't need a loader.
 ;; But if it were to take a long time, we'll show a loader.
@@ -336,3 +337,19 @@
  :change-route
  (fn [new-path]
    (.replaceState js/window.history nil "" (str "/" new-path))))
+
+;; filename - string including extension
+;; filetype - string to be appended to 'text/' forming a mime type
+;; data     - string representing the contents of the file
+(reg-fx
+ :download-file
+ (fn [{:keys [filename filetype data]}]
+   (let [a (ocall js/document :createElement "a")
+         url (encode-file data filetype)]
+     (oset! a [:style :display] "none")
+     (oset! a :href url)
+     (oset! a :download filename)
+     (ocall js/document.body :appendChild a)
+     (ocall a :click)
+     (ocall js/window.URL :revokeObjectURL url)
+     (ocall js/document.body :removeChild a))))

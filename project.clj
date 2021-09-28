@@ -4,7 +4,7 @@
       :out
       clojure.string/trim))
 
-(defproject org.intermine/bluegenes "1.0.1"
+(defproject org.intermine/bluegenes "1.2.1"
   :licence "LGPL-2.1-only"
   :description "Bluegenes is a Clojure-powered user interface for InterMine, the biological data warehouse"
   :url "http://www.intermine.org"
@@ -60,14 +60,9 @@
                  [com.taoensso/timbre "4.10.0"]
                  [com.fzakaria/slf4j-timbre "0.3.19"]
 
-                 ; Graphs
-                 [cljsjs/vega "5.9.0-0"]
-                 [cljsjs/vega-lite "4.0.2-0"]
-                 [cljsjs/vega-embed "6.0.0-0"]
-
                  ; Intermine Assets
-                 [org.intermine/imcljs "1.4.3"]
-                 [org.intermine/im-tables "0.13.0"]
+                 [org.intermine/imcljs "1.4.5"]
+                 [org.intermine/im-tables "0.14.0"]
                  [org.intermine/bluegenes-tool-store "0.2.2"]]
 
   :deploy-repositories {"clojars" {:sign-releases false}}
@@ -83,7 +78,9 @@
             ;; so they're accessible to config.
             [lein-environ "1.2.0"]]
 
-  :cljfmt {:indents {wait-for [[:inner 0]]}}
+  :cljfmt {:indents {wait-for [[:inner 0]]
+                     cond-> [[:inner 0]]
+                     cond->> [[:inner 0]]}}
 
   :aliases ~(let [compile-less ["npx" "lessc" "less/site.less" "resources/public/css/site.css"]
                   compile-less-prod (conj compile-less "-x")
@@ -148,7 +145,8 @@
              :biotestmine {;; We'd prefer to have resource path config/defaults here, but for some reason that makes the envvars below not apply.
                            :env {:bluegenes-default-service-root "http://localhost:9999/biotestmine"
                                  :bluegenes-default-mine-name "Biotestmine"
-                                 :bluegenes-default-namespace "biotestmine"}}}
+                                 :bluegenes-default-namespace "biotestmine"
+                                 :bluegenes-additional-mines [{:root "https://www.flymine.org/flymine" :name "FlyMine" :namespace "flymine"}]}}}
 
   :cljsbuild {:builds {:dev {:source-paths ["src/cljs"]
                              :figwheel {:on-jsload "bluegenes.core/mount-root"}

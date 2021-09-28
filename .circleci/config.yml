@@ -10,6 +10,7 @@ executors:
       BLUEGENES_DEFAULT_SERVICE_ROOT: "http://localhost:9999/biotestmine"
       BLUEGENES_DEFAULT_MINE_NAME: Biotestmine
       BLUEGENES_DEFAULT_NAMESPACE: biotestmine
+      BLUEGENES_ADDITIONAL_MINES: '[{:root "https://www.flymine.org/flymine" :name "FlyMine" :namespace "flymine"}]'
       CYPRESS_defaultCommandTimeout: 60000
       CYPRESS_requestTimeout: 60000
       CYPRESS_responseTimeout: 60000
@@ -52,7 +53,7 @@ jobs:
     - run: pyenv versions
     - run: pyenv global 3.8.5
     - run: pip3 install intermine-boot
-    - run: intermine_boot start local --build-im --im-branch bluegenes
+    - run: intermine_boot start local
     - checkout
     - restore_cache:
         keys:

@@ -123,10 +123,11 @@
 
 (defn init-configured-mine
   "Parse configured mine data passed from BlueGenes config."
-  [{:keys [root name namespace]}]
+  [{:keys [root name namespace external]}]
   {:id (keyword namespace)
    :name name
-   :service {:root root}})
+   :service {:root root}
+   :external? external})
 
 (defn init-mine-defaults
   "Load default mine data, as passed from a coupled InterMine or defined in
@@ -162,7 +163,7 @@
          renamedLists (some-> @init-vars :renamedLists not-empty)
          init-events (-> (some-> @init-vars :events not-empty)
                          (cond->
-                          renamedLists ((fnil conj []) (renamedLists->message renamedLists))))
+                           renamedLists ((fnil conj []) (renamedLists->message renamedLists))))
          ;; Configured mines are also passed from the Bluegenes backend,
          ;; usually defined in config.edn.
          config-mines (init-config-mines)
@@ -172,7 +173,7 @@
                      (assoc-in [:mines current-mine] mine)
                      (assoc :current-mine current-mine)
                      (cond->
-                      init-events (assoc :dispatch-after-boot init-events)))
+                       init-events (assoc :dispatch-after-boot init-events)))
          ;; Load data previously persisted to local storage.
          {:keys [assets version] :as state} (:local-store cofx)
          db (cond-> init-db
@@ -422,22 +423,24 @@
 
 (reg-event-fx
  :assets/success-fetch-lists
- (fn [{db :db} [_ mine-kw lists]]
-   (merge
-    {:db (assoc-in db [:assets :lists mine-kw] lists)}
-    ;; Denormalize lists right-away if you're on the lists page.
-    (when (= :lists-panel (:active-panel db))
-      {:dispatch [:lists/initialize]}))))
+ (fn [{db :db} [_ mine-kw next-evt lists]]
+   (cond-> {:db (assoc-in db [:assets :lists mine-kw] lists)
+            :dispatch-n []}
+     (vector? next-evt)
+     (update :dispatch-n conj next-evt)
+     ;; Denormalize lists right-away if you're on the lists page.
+     (= :lists-panel (:active-panel db))
+     (update :dispatch-n conj [:lists/initialize]))))
 
 ;; This event is also dispatched externally from bluegenes.pages.lists.events.
 (reg-event-fx
  :assets/fetch-lists
- (fn [{db :db} [evt]]
+ (fn [{db :db} [evt next-evt]]
    {:db (assoc-in db (concat lists/root [:fetching-lists?]) true)
     :im-chan {:chan (fetch/lists
                      (get-in db [:mines (:current-mine db) :service])
                      {:showTags true})
-              :on-success [:assets/success-fetch-lists (:current-mine db)]
+              :on-success [:assets/success-fetch-lists (:current-mine db) next-evt]
               :on-failure [:assets/failure evt]}}))
 
 ; Fetch class keys
@@ -492,7 +495,6 @@
 
 (reg-event-fx
  :assets/fetch-widgets
-  ;;fetches all enrichment widgets. afaik the non-enrichment widgets are InterMine 1.x UI specific so are filtered out upon success
  (fn [{db :db} [evt]]
    {:im-chan
     {:chan (fetch/widgets (get-in db [:mines (:current-mine db) :service]))
@@ -502,11 +504,7 @@
 (reg-event-db
  :assets/success-fetch-widgets
  (fn [db [_ mine-kw widgets]]
-   (let [widget-type "enrichment"
-         filtered-widgets
-         (doall (filter (fn [widget]
-                          (= widget-type (:widgetType widget))) widgets))]
-     (assoc-in db [:assets :widgets mine-kw] filtered-widgets))))
+   (assoc-in db [:assets :widgets mine-kw] widgets)))
 
 (reg-event-fx
  :assets/fetch-intermine-version

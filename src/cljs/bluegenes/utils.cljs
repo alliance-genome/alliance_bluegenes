@@ -6,7 +6,8 @@
             [bluegenes.version :as version]
             [bluegenes.components.icons :refer [icon]]
             [markdown-to-hiccup.core :as md]
-            [goog.string :as gstring]))
+            [goog.string :as gstring]
+            [oops.core :refer [ocall]]))
 
 (defn hiccup-anchors-newtab
   "Add target=_blank to all anchor elements, so all links open in new tabs."
@@ -117,6 +118,22 @@
    :name (:name reg-mine)
    :id (-> reg-mine :namespace keyword)
    :logo (-> reg-mine :images :logo)})
+
+(defn get-mine-ns
+  "Return the mine namespace as a keyword.
+  Handles both mines from the registry and config."
+  [mine]
+  (if (contains? mine :service) ; Only config mines have :service
+    (:id mine)
+    (keyword (:namespace mine))))
+
+(defn get-mine-url
+  "Return the mine url.
+  Handles both mines from the registry and config."
+  [mine]
+  (if (contains? mine :service) ; Only config mines have :service
+    (get-in mine [:service :root])
+    (:url mine)))
 
 (defn read-xml-query
   "Read an InterMine PathQuery in XML into an EDN Clojure map.
@@ -298,3 +315,14 @@
     (mapv (fn [result]
             (zipmap views result))
           (:results res))))
+
+(defn encode-file
+  "Encode a stringified text file such that it can be downloaded by the browser.
+  Results must be stringified - don't pass objects / vectors / arrays / whatever.
+  Ideally for performance, you'll want to invoke
+      (ocall js/window.URL :revokeObjectURL url)
+  where `url` is what's returned by this function, once you're done using it."
+  [data filetype]
+  (ocall js/URL "createObjectURL"
+         (js/Blob. (clj->js [data])
+                   {:type (str "text/" filetype)})))
