@@ -9,7 +9,9 @@
             [oops.core :refer [ocall oget oset!]]
             [goog.dom :as gdom]
             [goog.style :as gstyle]
-            [goog.fx.dom :as gfx]))
+            [goog.fx.dom :as gfx]
+            [bluegenes.config :refer [server-vars]]
+            [clojure.string :as str]))
 
 ;; Cofx and fx which you use from event handlers to read/write to localStorage.
 
@@ -58,7 +60,8 @@
 (reg-fx
  :document-title
  (fn [title]
-   (set! (.-title js/document) title)))
+   (set! (.-title js/document) title)
+   (js/gtag "event" "page_view" (clj->js {:page_title title}))))
 
 (comment
   "To update the document title, add the interceptor to any event that may
@@ -183,15 +186,20 @@
                   :delete http/delete
                   :put http/put
                   http/get)]
-    (let [c (http-fn uri (cond-> {}
-                           query-params (assoc :query-params query-params)
-                           json-params (assoc :json-params json-params)
-                           transit-params (assoc :transit-params transit-params)
-                           form-params (assoc :form-params form-params)
-                           multipart-params (assoc :multipart-params multipart-params)
-                           headers (update :headers #(merge % headers))
-                           (and token @token) (update :headers assoc "X-Auth-Token" @token)
-                           progress (assoc :progress progress)))]
+    (let [c (http-fn (if (str/starts-with? uri "/")
+                       ;; Path only = API call to BG backend.
+                       (str (:bluegenes-deploy-path @server-vars) uri)
+                       ;; Full address = API call to external service.
+                       uri)
+                     (cond-> {}
+                       query-params (assoc :query-params query-params)
+                       json-params (assoc :json-params json-params)
+                       transit-params (assoc :transit-params transit-params)
+                       form-params (assoc :form-params form-params)
+                       multipart-params (assoc :multipart-params multipart-params)
+                       headers (update :headers #(merge % headers))
+                       (and token @token) (update :headers assoc "X-Auth-Token" @token)
+                       progress (assoc :progress progress)))]
       (go (let [{:keys [status body] :as response} (<! c)]
             (cond
               (<= 200 status 399) (when on-success (dispatch (conj on-success body)))
@@ -296,8 +304,11 @@
 ;; Only works on the template page, where each template element has an ID.
 (reg-fx
  :scroll-to-template
- (fn [template-id]
-   (gstyle/scrollIntoContainerView (gdom/getElement template-id) nil true)))
+ (fn [{:keys [id delay]}]
+   (let [scroll! #(gstyle/scrollIntoContainerView (gdom/getElement id) nil true)]
+     (if (number? delay)
+       (js/setTimeout scroll! delay)
+       (scroll!)))))
 
 ;; Nice resource for more easing functions: https://gist.github.com/gre/1650294
 ;; Update: Looks like there are some easing functions in `goog.fx.easing`.
@@ -336,7 +347,7 @@
 (reg-fx
  :change-route
  (fn [new-path]
-   (.replaceState js/window.history nil "" (str "/" new-path))))
+   (.replaceState js/window.history nil "" (str (:bluegenes-deploy-path @server-vars) "/" new-path))))
 
 ;; filename - string including extension
 ;; filetype - string to be appended to 'text/' forming a mime type
@@ -353,3 +364,12 @@
      (ocall a :click)
      (ocall js/window.URL :revokeObjectURL url)
      (ocall js/document.body :removeChild a))))
+
+;; Uses the gtag client to send event data for GA4. This will do nothing if a Google Analytics ID isn't configured.
+;; https://developers.google.com/tag-platform/gtagjs/reference#event
+(reg-fx
+ :track-event
+ (fn [[event-name params-map]]
+   (if params-map
+     (js/gtag "event" event-name (clj->js params-map))
+     (js/gtag "event" event-name))))

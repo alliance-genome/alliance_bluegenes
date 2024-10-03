@@ -9,7 +9,7 @@
             [bluegenes.components.icons :refer [icon-comp]]
             [bluegenes.time :as time]
             [clojure.string :as str]
-            [bluegenes.config :refer [read-default-ns]]
+            [bluegenes.config :refer [read-default-ns server-vars]]
             [bluegenes.components.bootstrap :refer [poppable]]
             [bluegenes.components.icons :refer [icon]]
             [bluegenes.utils :refer [get-mine-url]]))
@@ -121,8 +121,9 @@
 
 (defn login-form [{:keys [credentials on-reset-password on-register]}]
   (let [{:keys [error? thinking? message]} @(subscribe [:bluegenes.subs.auth/auth])
-        oauth2-providers @(subscribe [:current-mine/oauth2-providers])
         current-mine @(subscribe [:current-mine])
+        current-mine-name @(subscribe [:current-mine-name])
+        oauth2-providers @(subscribe [:current-mine/oauth2-providers])
         {:keys [username password]} @credentials
         submit-fn #(dispatch [:bluegenes.events.auth/login username password])]
     [:form.login-form
@@ -156,21 +157,22 @@
        :on-click #(do (dispatch [:bluegenes.events.auth/clear-error])
                       (on-register))}
       "Create new account"]
-     [:div.oauth2-providers
-      (when (contains? oauth2-providers "GOOGLE")
-        [:button.btn
-         {:type "button"
-          :on-click #(dispatch [:bluegenes.events.auth/oauth2 "GOOGLE"])}
-         [:img.google-signin
-          {:src "/images/google-signin.png"
-           :alt "[Sign in with Google]"}]])
-      (when (contains? oauth2-providers "ELIXIR")
-        [:button.btn
-         {:type "button"
-          :on-click #(dispatch [:bluegenes.events.auth/oauth2 "ELIXIR"])}
-         [:img.elixir-login
-          {:src "/images/elixir-login.png"
-           :alt "[ELIXIR Login]"}]])]]))
+     (when (= current-mine-name (read-default-ns))
+       [:div.oauth2-providers
+        (when (contains? oauth2-providers "GOOGLE")
+          [:button.btn
+           {:type "button"
+            :on-click #(dispatch [:bluegenes.events.auth/oauth2 "GOOGLE"])}
+           [:img.google-signin
+            {:src (str (:bluegenes-deploy-path @server-vars) "/images/google-signin.png")
+             :alt "[Sign in with Google]"}]])
+        (when (contains? oauth2-providers "ELIXIR")
+          [:button.btn
+           {:type "button"
+            :on-click #(dispatch [:bluegenes.events.auth/oauth2 "ELIXIR"])}
+           [:img.elixir-login
+            {:src (str (:bluegenes-deploy-path @server-vars) "/images/elixir-login.png")
+             :alt "[ELIXIR Login]"}]])])]))
 
 (defn anonymous []
   (let [credentials (reagent/atom {:username nil :password nil})
@@ -187,7 +189,7 @@
                                            nil))))}
        [:a.dropdown-toggle
         {:data-toggle "dropdown" :role "button"}
-        [:span "LOGIN"]
+        [:span "Login"]
         [:svg.icon.icon-caret-down [:use {:xlinkHref "#icon-caret-down"}]]]
        [:div.dropdown-menu.login-form-dropdown
         (case @state*
@@ -328,11 +330,7 @@
                 :color @text-color
                 :fill @text-color}}
        [:ul
-        [:li.primary-nav.bluegenes-logo
-         [:a {:href (route/href ::route/home)}
-          [:svg.icon.icon-3x.icon-bluegenes-logo
-           [:use {:xlinkHref "#icon-bluegenes-logo"}]]
-          [:span.hidden-xs.hidden-sm "BLUEGENES"]]]
+        [mine-picker]
         ;; We want to show the nav buttons inside a container on small screens,
         ;; so it can be scrolled. But we don't want the nav buttons inside the
         ;; container on larger screens, so they can be placed more spaciously.
@@ -341,5 +339,4 @@
         [:div.nav-links.hidden-sm.hidden-md.hidden-lg
          [nav-buttons classes]]
         [:li.primary-nav.search.hidden-xs.hidden-sm [search/main]]
-        [mine-picker]
         [user]]])))

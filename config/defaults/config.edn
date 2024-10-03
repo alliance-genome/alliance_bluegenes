@@ -1,0 +1,23 @@
+{;; You will likely want to copy this file to config/prod/config.edn and make
+ ;; changes there. See docs/configuring.md for information on these fields.
+ :server-port 5000
+ :logging-level "info"
+ :google-analytics nil
+ :bluegenes-tool-path "./tools"
+ :bluegenes-deploy-path nil
+ :bluegenes-backend-service-root nil
+ :bluegenes-default-service-root "https://www.flymine.org/flymine"
+ :bluegenes-default-mine-name "FlyMine"
+ :bluegenes-default-namespace "flymine"
+ :bluegenes-additional-mines [
+                              ;; Example of an additional mine.
+                              ; {
+                              ;  :root "https://www.humanmine.org/humanmine"
+                              ;  :name "HumanMine"
+                              ;  :namespace "humanmine"
+                              ;  ; :external true ; Optional to open as a new tab.
+                              ;  }
+                              ]
+ :hide-registry-mines false
+ }
+

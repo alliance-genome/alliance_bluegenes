@@ -47,13 +47,21 @@ jobs:
         - ~/.m2
   setup_intermine:
     executor: intermine_exec
+    resource_class: large
     steps:
     - run: sudo apt-get update -y
     - run: sudo apt-get install -y libgconf-2-4
     - run: pyenv versions
     - run: pyenv global 3.8.5
     - run: pip3 install intermine-boot
+    - restore_cache:
+        keys:
+        - biotestmine-e756d26
     - run: intermine_boot start local
+    - save_cache:
+        key: biotestmine-e756d26
+        paths:
+        - ~/.local/share/intermine_boot
     - checkout
     - restore_cache:
         keys:

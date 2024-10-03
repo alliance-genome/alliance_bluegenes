@@ -1,19 +1,9 @@
 (ns bluegenes.pages.templates.subs
   (:require-macros [reagent.ratom :refer [reaction]])
   (:require [re-frame.core :as re-frame :refer [reg-sub]]
-            [bluegenes.pages.templates.helpers :as template-helpers]
-            [bluegenes.utils :refer [parse-template-rank]]
-            [clojure.string :as str]
-            [goog.string :as gstring]))
-
-(defn template-contains-string?
-  "Return true if a template's description contains a string"
-  [string [_ details]]
-  (if string
-    (if-let [description (:description details)]
-      (re-find (re-pattern (str "(?i)" (gstring/regExpEscape string))) description)
-      false)
-    true))
+            [bluegenes.pages.templates.helpers :as template-helpers :refer [template-matches?]]
+            [bluegenes.utils :refer [parse-template-rank template-contains-string?]]
+            [clojure.string :as str]))
 
 (reg-sub
  :templates
@@ -51,6 +41,11 @@
    (get-in db [:components :template-chooser :text-filter])))
 
 (reg-sub
+ :template-chooser/authorized-filter
+ (fn [db]
+   (get-in db [:components :template-chooser :authorized-filter])))
+
+(reg-sub
  :template-chooser-categories
  :<- [:templates]
  (fn [templates]
@@ -67,17 +62,13 @@
  :<- [:templates-by-rank]
  :<- [:selected-template-category]
  :<- [:template-chooser/text-filter]
- (fn [[sorted-templates category text-filter]]
-   (let [filter-pred (fn [tag category] (= tag (str "im:aspect:" category)))
-         filter-fn
-         (fn [[id details]]
-           (if category
-             (some? (some (fn [tag] (filter-pred tag category))
-                          (:tags details)))
-             true))]
-     (->> sorted-templates
-          (filter filter-fn)
-          (filter (partial template-contains-string? text-filter))))))
+ :<- [:template-chooser/authorized-filter]
+ (fn [[sorted-templates category text-filter authorized-filter]]
+   (filter (comp (partial template-matches? {:category category
+                                             :text text-filter
+                                             :authorized authorized-filter})
+                 val)
+           sorted-templates)))
 
 (defn popular-templates
   "Takes a sequence of sorted templates (presumably by rank) and returns a map
@@ -86,8 +77,10 @@
   the top 50 ranked templates. The templates to each category are part of the
   same top 50 ranked templates, although reduced to the top 10 for each category."
   [sorted-templates]
-  (let [top-50-templates (take-while #(<= (-> % val :rank parse-template-rank) 50)
-                                     sorted-templates)
+  (let [top-50-templates (-> (take-while #(<= (-> % val :rank parse-template-rank) 50)
+                                         sorted-templates)
+                             ;; Fallback if no templates are ranked.
+                             seq (or (take 50 sorted-templates)))
         top-6-categories (->> top-50-templates
                               (mapcat (comp :tags val))
                               (filter #(str/starts-with? % "im:aspect:"))
@@ -144,3 +137,24 @@
  :selected-template-service
  (fn [db _]
    (get-in db [:components :template-chooser :selected-template-service])))
+
+(reg-sub
+ :template-chooser/web-service-url
+ :<- [:selected-template]
+ :<- [:active-service]
+ (fn [[template service]]
+   (template-helpers/web-service-url service template)))
+
+(reg-sub
+ :template-chooser/changed-selected?
+ :<- [:selected-template]
+ :<- [:selected-template-name]
+ :<- [:templates]
+ (fn [[selected-tmpl tmpl-name all-templates]]
+   (not= selected-tmpl (get all-templates tmpl-name))))
+
+(reg-sub
+ :template-chooser/authorized?
+ :<- [:selected-template]
+ (fn [template]
+   (:authorized template)))

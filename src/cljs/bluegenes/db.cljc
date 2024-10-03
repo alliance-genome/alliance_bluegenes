@@ -14,13 +14,16 @@
    :search {:selected-results #{}}
    :idresolver {:stage {:files nil
                         :textbox nil
-                        :options {:case-sensitive false}
+                        :options {:case-sensitive false
+                                  :type "Gene"
+                                  :organism nil}
                         :status nil
                         :flags nil}
                 :to-resolve {:total nil
                              :identifiers []}
                 :save {:list-name nil}
-                :response nil}
+                :response nil
+                :error nil}
    ;; If you change this, you should change `remove-stateful-keys-from-db` too.
    :lists {:pagination {:per-page 20
                         :current-page 1}
@@ -41,4 +44,6 @@
         :preview nil
         :im-query nil
         :enhance-query {}
-        :root-class nil}})
+        :root-class nil}
+
+   :admin {:active-pill :admin.pill/report}})

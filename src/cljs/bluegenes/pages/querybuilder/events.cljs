@@ -7,10 +7,11 @@
             [imcljs.fetch :as fetch]
             [imcljs.save :as save]
             [clojure.set :refer [difference]]
+            [bluegenes.route :as route]
             [bluegenes.pages.querybuilder.logic :as logic
              :refer [read-logic-string remove-code vec->list append-code]]
             [clojure.string :as str :refer [join split blank? starts-with?]]
-            [bluegenes.utils :refer [read-xml-query dissoc-in]]
+            [bluegenes.utils :refer [read-xml-query dissoc-in template->xml]]
             [oops.core :refer [oget]]
             [clojure.walk :refer [postwalk]]
             [bluegenes.components.ui.constraint :as constraint]))
@@ -168,6 +169,63 @@
                   :sort (:sortOrder query)
                   :joins (set (:joins query)))
       :dispatch [:qb/enhance-query-build-im-query true]})))
+
+;; The JSON representation of template constraints is a bit different from how
+;; it's in XML (why aren't they the same??) We follow the XML convention in BG.
+;; Here's the mapping from XML <=> JSON template constraint representations:
+;; editable=true|false <=> editable=true|false
+;; no switchable <=> switchable=false switched=LOCKED
+;; switchable=on <=> switchable=true switched=ON
+;; switchable=off <=> switchable=true switched=OFF
+(defn read-template-constraints [temp-consts]
+  (mapv (fn [{:keys [editable switched description] :as const}]
+          (if (:type const)
+            ;; Type constraints cannot be used as template constraints.
+            [const {}]
+            (let [const (dissoc const :editable :switchable :switched :description)
+                  switched (str/lower-case switched)]
+              [const
+               (-> {}
+                   (assoc :editable editable
+                          :description description)
+                   (cond-> (#{"on" "off"} switched)
+                     (assoc :switchable switched)))])))
+        temp-consts))
+
+(reg-event-fx
+ :qb/load-template
+ (fn [{db :db} [_ template-query]]
+   (let [[consts consts-meta] ((juxt (partial mapv first)
+                                     (partial mapv second))
+                               (read-template-constraints (:where template-query)))
+         query (assoc template-query :where consts)
+         query (im-query/sterilize-query query)
+         tree (treeify query)]
+     {:db (update db :qb assoc
+                  :enhance-query tree
+                  :menu tree
+                  :order (:select query)
+                  :root-class (keyword (:from query))
+                  :constraint-logic (read-logic-string (:constraintLogic query))
+                  :sort (:sortOrder query)
+                  :joins (set (:joins query))
+                  :template-meta (-> template-query
+                                     (select-keys [:name :title :comment :description])
+                                     ;; As we treeify the query, and :im-query:where is derived from that tree, we lose the ordering of constraints. Ideally, we want template constraints to appear in the same order they did in the template view, but supporting this ordering with the way the QB has been implemented with a tree, seems to be very error prone and difficult. The proper way to achieve that would be to change the QB to support ordering of constraints, which takes much more time. For now, we won't do this, so the ordering will be different, and we'll have to map each constraint to their corresponsive meta, which is done with this map.
+                                     (assoc :const->meta (zipmap consts consts-meta))))
+      :dispatch [:qb/enhance-query-build-im-query true]})))
+
+(reg-event-db
+ :qb/update-template-meta
+ (fn [db [_ template-details const->meta]]
+   (assoc-in db [:qb :template-meta]
+             (assoc template-details
+                    :const->meta const->meta))))
+
+(reg-event-db
+ :qb/update-template-meta-consts
+ (fn [db [_ const->meta]]
+   (assoc-in db [:qb :template-meta :const->meta] const->meta)))
 
 (reg-event-fx
  :qb/set-root-class
@@ -340,15 +398,22 @@
 (reg-event-fx
  :qb/enhance-query-add-view
  (fn [{db :db} [_ path-vec]]
-   (let [subclasses (get-all-subclasses (get-in db [:qb :menu]) path-vec)]
-     {:db (cond-> db
-            path-vec (-> (assoc-in (into [:qb :enhance-query] path-vec) {})
-                         (update-in [:qb :order] add-if-missing (join "." path-vec)))
-            (seq subclasses) (update-in [:qb :enhance-query]
-                                        (partial reduce #(apply set-subclass %1 %2))
-                                        subclasses))
-      :dispatch-n [[:qb/fetch-possible-values path-vec]
-                   [:qb/enhance-query-build-im-query true]]})))
+   (let [subclasses (get-all-subclasses (get-in db [:qb :menu]) path-vec)
+         enhanced-db (cond-> db
+                       path-vec (-> (assoc-in (into [:qb :enhance-query] path-vec) {})
+                                    (update-in [:qb :order] add-if-missing (join "." path-vec)))
+                       (seq subclasses) (update-in [:qb :enhance-query]
+                                                   (partial reduce #(apply set-subclass %1 %2))
+                                                   subclasses))]
+     ;; We pass the db with updated :enhanced-query instead of updating the db
+     ;; here, to avoid an invalid state where the view updating causes a model
+     ;; walk to return nil due to :im-query not having a required type
+     ;; constraint (which only gets added in the next event).
+     {:dispatch-n [[:qb/enhance-query-build-im-query true enhanced-db]
+                   ;; Note: It may be possible for the below event to fail due
+                   ;; to the above. This only means possible values won't be
+                   ;; found though, so not a crash.
+                   [:qb/fetch-possible-values path-vec]]})))
 
 (defn split-and-drop-first [parent-path summary-field]
   (concat parent-path ((comp vec (partial drop 1) #(clojure.string/split % ".")) summary-field)))
@@ -370,20 +435,24 @@
          class (im-path/class model (join "." original-path-vec))
          summary-fields (get all-summary-fields (or (keyword subclass) class))
          adjusted-views (map (partial split-and-drop-first original-path-vec) summary-fields)
-         subclasses (get-all-subclasses (get-in db [:qb :menu]) original-path-vec)]
-     {:db (-> (reduce (fn [db path-vec]
-                        (if path-vec
-                          (-> db
-                              (update-in (into [:qb :enhance-query] path-vec) deep-merge {})
-                              (update-in [:qb :order] add-if-missing (join "." path-vec)))
-                          db))
-                      db
-                      adjusted-views)
-              (cond->
-                (seq subclasses) (update-in [:qb :enhance-query]
-                                            (partial reduce #(apply set-subclass %1 %2))
-                                            subclasses)))
-      :dispatch [:qb/enhance-query-build-im-query true]})))
+         subclasses (get-all-subclasses (get-in db [:qb :menu]) original-path-vec)
+         enhanced-db (-> (reduce (fn [db path-vec]
+                                   (if path-vec
+                                     (-> db
+                                         (update-in (into [:qb :enhance-query] path-vec) deep-merge {})
+                                         (update-in [:qb :order] add-if-missing (join "." path-vec)))
+                                     db))
+                                 db
+                                 adjusted-views)
+                         (cond->
+                           (seq subclasses) (update-in [:qb :enhance-query]
+                                                       (partial reduce #(apply set-subclass %1 %2))
+                                                       subclasses)))]
+     ;; We pass the db with updated :enhanced-query instead of updating the db
+     ;; here, to avoid an invalid state where the view updating causes a model
+     ;; walk to return nil due to :im-query not having a required type
+     ;; constraint (which only gets added in the next event).
+     {:dispatch [:qb/enhance-query-build-im-query true enhanced-db]})))
 
 (reg-event-fx
  :qb/enhance-query-remove-view
@@ -394,14 +463,15 @@
                         (reduce add-if-missing (get-in db [:qb :order]))
                         (remove (partial (complement within?) remaining-views))
                         vec)
+         new-joins (into #{} (filter #(get-in trimmed (split % #"\."))) (get-in db [:qb :joins]))
          current-codes (set (remove nil? (used-const-code (get-in db [:qb :enhance-query]))))
          remaining-codes (set (used-const-code trimmed))
          codes-to-remove (map symbol (clojure.set/difference current-codes remaining-codes))]
-
      {:db (update-in db [:qb] assoc
                      :enhance-query trimmed
                      :constraint-logic (reduce remove-code (get-in db [:qb :constraint-logic]) codes-to-remove)
-                     :order new-order)
+                     :order new-order
+                     :joins new-joins)
       :dispatch [:qb/enhance-query-build-im-query true]})))
 
 (defn subpath-of? [subpath path]
@@ -499,8 +569,11 @@
 
 (reg-event-fx
  :qb/enhance-query-build-im-query
- (fn [{db :db} [_ fetch-preview?]]
-   (let [enhance-query (get-in db [:qb :enhance-query])
+ (fn [{db :db} [_ fetch-preview? ?enhanced-db]]
+   ;; Passing ?enhanced-db allows the event handler dispatching this event
+   ;; handler to avoid updating the view, until :im-query gets updated.
+   (let [db (or ?enhanced-db db)
+         enhance-query (get-in db [:qb :enhance-query])
          service (get-in db [:mines (get-in db [:current-mine]) :service])
          im-query (-> {:from (name (get-in db [:qb :root-class]))
                        :select (get-in db [:qb :order])
@@ -511,7 +584,7 @@
                       (im-query/sterilize-query))
          query-changed? (not= im-query (get-in db [:qb :im-query]))]
      (cond-> {:db (update-in db [:qb] assoc :im-query im-query)}
-       (and fetch-preview?) (assoc :dispatch [:qb/fetch-preview service im-query])))))
+       fetch-preview? (assoc :dispatch [:qb/fetch-preview service im-query])))))
 
 (reg-event-fx
  :qb/set-order
@@ -722,3 +795,41 @@
  :qb/clear-import-result
  (fn [db [_]]
    (update db :qb dissoc :import-result)))
+
+(reg-event-db
+ :qb/swap-constraints-ordering
+ (fn [db [_ i1 i2]]
+   (update-in db [:qb :im-query :where] logic/vec-swap-indices i1 i2)))
+
+(reg-event-fx
+ :qb/save-template
+ (fn [{db :db} [_ template-details template-constraints]]
+   (let [service (get-in db [:mines (:current-mine db) :service])
+         model (:model service)
+         query (assoc (get-in db [:qb :im-query])
+                      :where template-constraints)
+         template-query (template->xml model template-details query)]
+     {:im-chan {:chan (save/template service template-query)
+                :on-success [:qb/save-template-success (:name template-details)]
+                :on-failure [:qb/save-template-failure (:name template-details)]}})))
+
+(reg-event-fx
+ :qb/save-template-success
+ (fn [{db :db} [_ template-name _res]]
+   {:dispatch-n [[:assets/fetch-templates]
+                 [:messages/add
+                  {:markup [:span "Saved template: "
+                            [:a {:href (route/href ::route/template {:template template-name})}
+                             template-name]]
+                   :style "success"}]]}))
+
+;; Also dispatch from :templates/undo-delete-template
+(reg-event-fx
+ :qb/save-template-failure
+ (fn [{db :db} [_ template-name res]]
+   {:dispatch [:messages/add
+               {:markup [:span [:strong "Failed to save template " [:em template-name]] " "
+                         (when-let [err (get-in res [:body :error])]
+                           [:code err])]
+                :timeout 10000
+                :style "danger"}]}))

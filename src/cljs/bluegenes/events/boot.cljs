@@ -153,17 +153,15 @@
    (let [default-ns (read-default-ns)
          ;; We have to set the db current-mine using `window.location` as the
          ;; router won't have dispatched `:set-current-mine` before later on.
-         current-mine (-> (.. js/window -location -pathname)
-                          (str/split #"/")
-                          (second)
-                          (keyword)
-                          (or default-ns))
+         current-mine (or (keyword (utils/mine-from-pathname)) default-ns)
          ;; These could be passed from the Bluegenes backend and result in
          ;; events being dispatched.
          renamedLists (some-> @init-vars :renamedLists not-empty)
+         linkIn       (some-> @init-vars :linkIn not-empty)
          init-events (-> (some-> @init-vars :events not-empty)
                          (cond->
-                           renamedLists ((fnil conj []) (renamedLists->message renamedLists))))
+                           renamedLists ((fnil conj []) (renamedLists->message renamedLists))
+                           linkIn       ((fnil conj []) [:handle-link-in linkIn])))
          ;; Configured mines are also passed from the Bluegenes backend,
          ;; usually defined in config.edn.
          config-mines (init-config-mines)
@@ -235,7 +233,11 @@
       (update-in [:lists :selected-lists] empty)
       ;; The old by-id map is used to detect newly added lists.
       ;; During a mine change, this will mean all lists, which we don't want.
-      (update-in [:lists :by-id] empty)))
+      (update-in [:lists :by-id] empty)
+      ;; Clear any chosen template and filters
+      (update :components dissoc :template-chooser)
+      ;; Clear admin page manage templates panel.
+      (assoc-in [:admin :manage-templates] nil)))
 
 (reg-event-fx
  :reboot
@@ -295,8 +297,8 @@
         ;;set tracker up if we have a tracking id
        (do
          (try
-           (js/ga "create" analytics-id "auto")
-           (js/ga "send" "pageview")
+           (js/gtag "js" (js/Date.))
+           (js/gtag "config" analytics-id)
            (catch js/Error _))
          (.info js/console
                 "Google Analytics enabled. Tracking ID:"
@@ -406,10 +408,12 @@
    ;; this turned out to be a very bad idea! This is because the model is used
    ;; to parse paths into classes, which means it has to be complete. This also
    ;; applies to the model hierarchy.
-   (-> db
-       (assoc-in [:mines mine-kw :service :model] model)
-       (assoc-in [:mines mine-kw :default-object-types] (sort (preferred-fields model)))
-       (assoc-in [:mines mine-kw :model-hier] (extends-hierarchy (:classes model))))))
+   (let [default-object-types (vec (sort (preferred-fields model)))]
+     (-> db
+         (assoc-in [:mines mine-kw :service :model] model)
+         (assoc-in [:mines mine-kw :default-object-types] default-object-types)
+         (assoc-in [:idresolver :stage :options :type] (some-> default-object-types first name))
+         (assoc-in [:mines mine-kw :model-hier] (extends-hierarchy (:classes model)))))))
 
 (reg-event-fx
  :assets/fetch-model
@@ -432,7 +436,7 @@
      (= :lists-panel (:active-panel db))
      (update :dispatch-n conj [:lists/initialize]))))
 
-;; This event is also dispatched externally from bluegenes.pages.lists.events.
+;; This event is also dispatched externally from many other namespaces.
 (reg-event-fx
  :assets/fetch-lists
  (fn [{db :db} [evt next-evt]]
@@ -462,19 +466,22 @@
 
 ; Fetch templates
 
-(reg-event-db
+(reg-event-fx
  :assets/success-fetch-templates
- (fn [db [_ mine-kw lists]]
-   (assoc-in db [:assets :templates mine-kw] lists)))
+ (fn [{db :db} [_ mine-kw next-evt templates]]
+   (cond-> {:db (assoc-in db [:assets :templates mine-kw] templates)
+            :dispatch-n []}
+     (vector? next-evt)
+     (update :dispatch-n conj next-evt))))
 
+;; This event is also dispatched externally from other namespaces.
 (reg-event-fx
  :assets/fetch-templates
- (fn [{db :db} [evt]]
+ (fn [{db :db} [evt next-evt]]
    {:db db
-    :im-chan
-    {:chan (fetch/templates (get-in db [:mines (:current-mine db) :service]))
-     :on-success [:assets/success-fetch-templates (:current-mine db)]
-     :on-failure [:assets/failure evt]}}))
+    :im-chan {:chan (fetch/templates (get-in db [:mines (:current-mine db) :service]))
+              :on-success [:assets/success-fetch-templates (:current-mine db) next-evt]
+              :on-failure [:assets/failure evt]}}))
 
 ; Fetch summary fields
 
@@ -561,6 +568,33 @@
  :assets/success-fetch-branding
  (fn [db [_ mine-kw branding-properties]]
    (assoc-in db [:mines mine-kw :branding] branding-properties)))
+
+(reg-event-fx
+ :handle-link-in
+ (fn [{db :db} [_ {:keys [target data]}]]
+   (case target
+     :upload (let [classes (get-in db [:mines (:current-mine db) :service :model :classes])
+                   identifiers (or (:externalids data) (:externalid data))
+                   error (cond
+                           (or (str/blank? identifiers) (str/blank? (:class data)))
+                           "Class and externalids parameters need to be specified when linking in to upload page. You have been redirected to the home page."
+                           (not (contains? classes (keyword (:class data))))
+                           "Invalid class specified when linking in to upload page. You have been redirected to the home page.")]
+               (if error
+                 {:dispatch [:messages/add
+                             {:markup [:span error]
+                              :style "warning"
+                              :timeout 0}]}
+                 {:db (update-in db [:idresolver :stage :options] assoc
+                                 :type (:class data)
+                                 :organism (:extraValue data))
+                  :dispatch
+                  [:bluegenes.components.idresolver.events/parse-staged-files
+                   nil
+                   identifiers
+                   {:case-sensitive false
+                    :type (:class data)
+                    :organism (:extraValue data)}]})))))
 
 (reg-event-fx
  :assets/failure

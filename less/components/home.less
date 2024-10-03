@@ -16,6 +16,10 @@
         font-weight: bold;
     }
 
+    h1 {
+        font-size: 3em;
+    }
+
     h2 {
         font-size: 2.6em;
     }
@@ -59,7 +63,7 @@
             margin-bottom: @spacer*2.2;
         }
 
-        h2 {
+        h1, h2 {
             color: @branding-color-secondary;
         }
 
@@ -220,9 +224,9 @@
                     }
 
                     & > * {
-                        flex-grow: 1;
+                        // flex-grow: 1;
                         flex-basis: 0;
-                        max-width: 10em;
+                        // max-width: 10em;
                         white-space: nowrap;
                         display: flex;
 
@@ -231,6 +235,7 @@
                         }
 
                         &.icon {
+                            min-width: 2em;
                             fill: @branding-color-secondary;
                             background: linear-gradient(to right, fade(@body-background-color, 0%), @body-background-color 25%, @body-background-color 75%, fade(@body-background-color, 0%) 100%);
                         }
